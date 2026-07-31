@@ -1,0 +1,11 @@
+# 依赖
+node_modules/
+
+# Claude Code 本地状态
+.claude/
+
+# macOS
+.DS_Store
+
+# 日志
+*.log

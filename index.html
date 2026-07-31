@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; img-src 'self' data: https:; worker-src 'self' blob:">
+  <title>Electron HWL IDB Test</title>
+  <link rel="stylesheet" href="./vendor/pico.min.css">
+  <style>
+    :root {
+      --pico-form-element-spacing-vertical: 0.35rem;
+      --pico-form-element-spacing-horizontal: 0.7rem;
+      --pico-form-element-font-size: 0.85rem;
+      --pico-typography-font-size: 0.9rem;
+    }
+    body { margin: 0; padding: 0; }
+    nav.topbar { padding: .4rem 1rem; border-bottom: 1px solid var(--pico-muted-border-color); display: flex; align-items: center; gap: 1rem; }
+    nav.topbar .title { font-weight: 600; font-size: .9rem; }
+    nav.topbar .meta { font-size: .75rem; color: var(--pico-muted-color); }
+    nav.topbar .nav-btns { margin-left: auto; display: flex; gap: .3rem; }
+    nav.topbar .nav-btns button { margin: 0; padding: .25rem .6rem; font-size: .8rem; }
+    main { padding: 1.2rem; max-width: 920px; margin: 0 auto; }
+    article { margin-bottom: 1rem; padding: 1rem 1.2rem; }
+    article h3 { margin-bottom: .6rem; font-size: 1rem; }
+    h2 { font-size: 1.2rem; margin-bottom: .8rem; }
+    label { margin-bottom: .4rem; font-size: .82rem; }
+    .row { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+    .row > label { flex: 1; margin: 0; }
+    .row > input, .row > select { flex: 1; margin: 0; min-width: 140px; }
+    .btns { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .6rem; }
+    .btns button { margin: 0; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+    .grid-2 label { margin: 0; font-size: .8rem; }
+    [data-goto].active { background: var(--pico-primary-background); color: var(--pico-primary-inverse); border-color: var(--pico-primary); }
+    small.ver { color: var(--pico-muted-color); }
+    input.font-mono, input[placeholder*="idClient"] { font-family: monospace; font-size: .82rem; }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部导航 -->
+  <nav class="topbar">
+    <span class="title">Electron HWL IDB Test</span>
+    <small class="meta">Node <span id="node-ver"></span> · Electron <span id="electron-ver"></span></small>
+    <span class="nav-btns">
+      <button data-goto="home" class="outline secondary">主页</button>
+      <button data-goto="db-test" class="outline secondary">DB 测试</button>
+    </span>
+  </nav>
+
+  <main>
+    <!-- ============ 主页：NIM 连接 ============ -->
+    <section id="view-home">
+      <h2>NIM 连接</h2>
+
+      <article>
+        <h3>账号配置</h3>
+        <label>appkey
+          <input id="l-appkey" type="text" value="45c6****dd6e">
+        </label>
+        <label>token
+          <input id="l-token" type="text" value="e10a****883e">
+        </label>
+        <label>account
+          <input id="l-account" type="text" value="c*1">
+        </label>
+        <div class="btns">
+          <button id="login">登录</button>
+          <button id="disconnect" class="secondary">登出</button>
+          <button id="destroy" class="contrast">销毁</button>
+        </div>
+      </article>
+
+      <p><small>登录后可在「DB 测试」页操作 IndexedDB / FTS。</small></p>
+    </section>
+
+    <!-- ============ DB 测试页 ============ -->
+    <section id="view-db-test" hidden>
+      <article>
+        <h3>当前写入的 DB</h3>
+        <input id="w-db" type="text" value="nim-cs1" readonly>
+        <p><small>NIM 登录后自动写入 <code>nim-{account}</code>。所有操作直连该 IDB。</small></p>
+      </article>
+
+      <!-- 1. 批量写入 -->
+      <article>
+        <h3>1. 批量写入</h3>
+        <form id="form-write">
+          <div class="grid-2">
+            <label>会话 ID（不填则随机）
+              <input id="w-sessionId" type="text" placeholder="p2p-cs1">
+            </label>
+            <label>关键字（不填则随机）
+              <input id="w-keyword" type="text" placeholder="关键字">
+            </label>
+            <label>条数
+              <input id="w-number" type="number" placeholder="1000" required>
+            </label>
+          </div>
+          <div class="btns">
+            <button id="btn-write" type="submit">写入</button>
+          </div>
+        </form>
+      </article>
+
+      <!-- 2. 批量删除 -->
+      <article>
+        <h3>2. 批量删除</h3>
+        <div class="row">
+          <input id="w-delete-sessionId" type="text" value="p2p-cs1" placeholder="会话 id">
+          <button id="btn-delete" class="contrast">删除</button>
+        </div>
+      </article>
+
+      <!-- 3. 逐条读取 -->
+      <article>
+        <h3>3. 逐条读取 DB 检查是否损坏</h3>
+        <button id="btn-readall">go</button>
+      </article>
+
+      <!-- 4. 清空 DB -->
+      <article>
+        <h3>4. 清空 DB</h3>
+        <button id="btn-clear" class="contrast">清空 msg1</button>
+      </article>
+
+      <!-- 5. 未读数检查 -->
+      <article>
+        <h3>5. 未读数检查</h3>
+        <form id="form-unread">
+          <div class="grid-2">
+            <label>会话 ID（scene 前缀 p2p- / team- / superTeam-）
+              <input id="unread-sessionId" type="text" value="p2p-cs1" placeholder="p2p-cs1" required>
+            </label>
+            <label>ack timetag（数字，计 (ack, ∞) 范围）
+              <input id="unread-ack" type="number" placeholder="0" required>
+            </label>
+          </div>
+          <p><small>shouldCountNotifyUnread 默认 <code>() =&gt; true</code>（仅对 type==='notification' 消息调用）</small></p>
+          <div class="btns">
+            <button id="btn-unread" type="submit">查询</button>
+          </div>
+        </form>
+        <p><output id="unread-out"><small>结果与耗时将显示在此</small></output></p>
+      </article>
+    </section>
+  </main>
+
+  <script src="./renderer.js"></script>
+  <script src="./db-action.js"></script>
+</body>
+</html>
