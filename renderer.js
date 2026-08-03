@@ -1,4 +1,4 @@
-const SDK = require('./sdk/NIM_Web_SDK_v8.9.12706')
+const SDK = require('./sdk/NIM_Web_SDK_v8.9.12711')
 const Test = require('./test')
 const NIM = SDK.NIM
 
