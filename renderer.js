@@ -1,6 +1,5 @@
-const SDK = require('./sdk/NIM_Web_SDK_v8.9.12711')
+const NIM = require('./sdk/NIM_Web_NIM_v8.9.12706')
 const Test = require('./test')
-const NIM = SDK.NIM
 
 document.getElementById('node-ver').textContent = process.versions.node
 document.getElementById('electron-ver').textContent = process.versions.electron
