@@ -1,4 +1,5 @@
-const NIM = require('./sdk/NIM_Web_NIM_v8.9.12706')
+const NIM = require('./sdk/NIM_Web_NIM_v8.9.12711-alpha.3')
+// const NIM = require('./sdk/NIM_Web_NIM')
 const Test = require('./test')
 
 document.getElementById('node-ver').textContent = process.versions.node
@@ -87,6 +88,7 @@ function login () {
     reconnectionDelayMax: 60000,
     reconnectionJitter: 0,
     searchDBPath: process.env.HOME,
+	maxUnreadCount: 500,
 
     onconnect (obj) {
       console.log('连接建立成功', obj)

@@ -314,7 +314,7 @@ class Test {
       console.error(TAG_NAME, 'NIM 未初始化，无法调用 getMsgCountAfterAckIndexedDB')
       return null
     }
-    const params = { sessionId, ack, shouldCountNotifyUnread }
+    const params = { sessionId, ack, shouldCountNotifyUnread, maxUnreadCount: 500 }
     console.log(TAG_NAME, 'getMsgCountAfterAckIndexedDB params:', { sessionId, ack })
     const t0 = performance.now()
     let result
