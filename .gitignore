@@ -11,3 +11,5 @@ node_modules/
 *.log
 
 debug
+.yunxin-devflow/
+yunxin-specs

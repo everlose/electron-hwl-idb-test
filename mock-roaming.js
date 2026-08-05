@@ -1,5 +1,5 @@
 // 漫游消息（sid:4 cid:9）样本（wire-format，已序列化）
-// 字段键为协议字段号："0"=type, "1"=from, "5"=sessionId, "7"=time, "11"=idClient, "12"=idServer 等
+// 字段键为协议字段号："0"=type, "1"=to, "2"=from, "5"=sessionId, "7"=time, "11"=idClient, "12"=idServer 等
 const SAMPLE_ROAMING_MSGS = [
   { '0': '0', '1': 'ctt5', '2': 'ctt1', '4': '65', '5': 'cb9db6a82f087c0e912e103930847655', '6': 'newNick3', '7': '1785412477989', '8': '3', '9': '', '10': '{"name":"","uploadState":1,"sceneName":"nim_default_im","size":317644,"md5":"6FD8FBBE181D5F62B4E047466EA3AABE","url":"https://nim-mixdn-gy.chatnos.com/MjYxNjY0MzM=/bmltYV8zMzM1NjIyMzc3NjVfMTc4NTQxMjQ3NzE3OF81MmMyYTlhMS05ZWJkLTQ4NDgtYTYwZi1jYjJiODdmYWYxODE=","ext":"mp4","w":640,"h":368,"dur":5083}', '11': '4f460a1a10e78ebd99bd2ba4799e19fa', '12': '18712831136496', '13': '0', '14': '1781686692088', '15': '', '17': '', '18': '#%@all@%#', '20': '0', '25': '1', '26': '0', '28': '1', '40': '', '46': '{"statistics":{"apiCallingTime":1785412477117,"attachUploadDuration":823,"sendTime":1785412477970}}', '62': '0', '63': '', '100': '1', '101': '1', '102': '1', '103': '1', '105': '1', '107': '1', '108': '1', '109': '1', '110': '1' },
   { '0': '0', '1': 'ctt5', '2': 'ctt1', '4': '65', '5': 'cb9db6a82f087c0e912e103930847655', '6': 'newNick3', '7': '1785406194315', '8': '1', '9': '', '10': '{"name":"","uploadState":1,"sceneName":"nim_default_im","size":482689,"md5":"1AE16137625DF97DEDF3139FC5A2F0D5","url":"https://nim-mixdn-gy.chatnos.com/MjYxNjY0MzM=/bmltYV8zMzM1NjIyMzc3NjVfMTc4NTQwNjE5MzE5Ml9hYzRmY2JmNS0zYjVhLTRiNzctOTQ2ZS00ZGI2ZDA4M2QwN2I=","ext":"jpg","w":0,"h":0}', '11': '84d3321c1a48b9756900f0823a52a411', '12': '18711987622031', '13': '0', '14': '1781686692088', '15': '', '17': '', '18': '#%@all@%#', '20': '0', '25': '1', '26': '0', '28': '1', '40': '', '46': '{"statistics":{"apiCallingTime":1785406193121,"attachUploadDuration":1121,"sendTime":1785406194262}}', '62': '0', '63': '', '100': '1', '101': '1', '102': '1', '103': '1', '105': '1', '107': '1', '108': '1', '109': '1', '110': '1' },
@@ -79,8 +79,8 @@ function buildMockRoamingPackets ({ account, batchCount = 100, batchSize = 100, 
 
       arr[i] = {
         ...tpl,
-        '1': peer,                                  // from = peer
-        '2': account,                                // to = 登录账号 → getMsgTarget 返回 from
+        '1': account,                                 // to = 登录账号（自己）
+        '2': peer,                                    // from = peer（cs{N}）→ getMsgTarget 返回 from = cs{N}
         '5': sessionHash,                           // 批内一致的会话哈希占位
         '7': String(base - (batchCount - b) * batchSize - (batchSize - i)),
         '11': randomHex(32),

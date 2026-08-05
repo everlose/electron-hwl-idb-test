@@ -1,4 +1,4 @@
-const NIM = require('./sdk/NIM_Web_NIM_v8.9.12711-alpha.4')
+const NIM = require('./sdk/NIM_Web_NIM_v8.9.12711-alpha.5')
 // const NIM = require('./sdk/NIM_Web_NIM')
 // const NIM = require('./sdk/NIM_Web_NIM_v8.9.12706')
 const Test = require('./test')
