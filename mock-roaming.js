@@ -71,7 +71,7 @@ function buildMockRoamingPackets ({ account, batchCount = 100, batchSize = 100, 
   const base = Date.now()
   for (let b = 0; b < batchCount; b++) {
     // const let peer = b === 0 ? 'cs2' : `cs${start + b}`
-	const let peer = `cs${start + b}`
+	const peer = `cs${start + b}`
     const sessionHash = randomHex(32)
     const arr = new Array(batchSize)
     for (let i = 0; i < batchSize; i++) {
