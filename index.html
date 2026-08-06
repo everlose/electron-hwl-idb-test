@@ -65,10 +65,19 @@
         </label>
         <div class="btns">
           <button id="login">登录</button>
-          <button id="login-mock-roaming" class="secondary">模拟1w漫游消息登录</button>
           <button id="disconnect" class="secondary">登出</button>
           <button id="destroy" class="contrast">销毁</button>
         </div>
+        <div class="btns">
+          <button id="login-mock-roaming" class="secondary">模拟1w漫游消息登录</button>
+          <button id="login-mock-roaming-halfack" class="secondary">模拟1w漫游兼Ack一半数量登录</button>
+          <button id="login-mock-roaming-halfack-recall" class="secondary">模拟1w漫游兼Ack一半、撤回/删除两条登录</button>
+        </div>
+        <p><small>mock 场景说明：<br>
+        1. 10000 漫游消息 = 100 会话 × 100 消息<br>
+        2. Ack 一半 = 前 50 个会话各取中间一条消息的发送时间作为 ack，后 50 个会话不下发 ack<br>
+        3. 撤回/删除 = 撤回 100 个会话各自最后一条消息（7_15），单向删除一条已在 DB 的原会话 lastMsg（4_21）
+        </small></p>
       </article>
 
       <p><small>登录后可在「DB 测试」页操作 IndexedDB / FTS。</small></p>

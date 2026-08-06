@@ -64,33 +64,117 @@ function buildMockRoamingPacket (count = 10000) {
  * @param {Number} [opts.batchCount=100]
  * @param {Number} [opts.batchSize=100]
  * @param {Number} [opts.start=100]  会话编号起点（i=0 对应 cs{start}）
- * @returns {String[]} batchCount 个 packet JSON 字符串
+ * @param {Number} [opts.ackCount=0]  给前 ackCount 个会话下发 4_14 ack（ack=各会话消息时间中位数）；0=不下发（全部 no-ack 走 delta）
+ * @param {Boolean} [opts.recallLast=false]  是否构建 7_15 撤回包，撤回每个会话的最后一条消息
+ * @param {Number} [opts.ackSer=10001]  4_14 ack 包 ser（须 > 4_9 的 ser:10000）
+ * @param {Number} [opts.recallSer=10002]  7_15 撤回包 ser（须 > 4_14 的 ser）
+ * @returns {{packets: String[], ackPacket: String|null, recallPacket: String|null}}  packets=4_9；ackPacket=4_14（ackCount>0）；recallPacket=7_15（recallLast）
  */
-function buildMockRoamingPackets ({ account, batchCount = 100, batchSize = 100, start = 100 }) {
+function buildMockRoamingPackets ({ account, batchCount = 100, batchSize = 100, start = 100, ackCount = 0, recallLast = false, ackSer = 10001, recallSer = 10002 }) {
   const packets = new Array(batchCount)
+  const ackByPeer = {} // peer(cs{N}) -> 该会话消息时间(字段7)的中位数，作为 4_14 的 ack 值（仅前 ackCount 个会话）
+  const lastMsgPerSession = [] // 每会话最后一条消息（idClient/idServer/time），供 7_15 撤回
   const base = Date.now()
   for (let b = 0; b < batchCount; b++) {
     // const let peer = b === 0 ? 'cs2' : `cs${start + b}`
 	const peer = `cs${start + b}`
     const sessionHash = randomHex(32)
     const arr = new Array(batchSize)
+    const times = [] // 收集本会话所有消息 time(字段7)，用于取中位数作为 ack
     for (let i = 0; i < batchSize; i++) {
       const tpl = SAMPLE_ROAMING_MSGS[i % SAMPLE_ROAMING_MSGS.length];
-
+      const t = String(base - (batchCount - b) * batchSize - (batchSize - i))
+      times.push(Number(t))
+      const idClient = randomHex(32)
+      const idServer = String(18600000000000 + b * batchSize + i)
       arr[i] = {
         ...tpl,
         '1': account,                                 // to = 登录账号（自己）
         '2': peer,                                    // from = peer（cs{N}）→ getMsgTarget 返回 from = cs{N}
         '5': sessionHash,                           // 批内一致的会话哈希占位
-        '7': String(base - (batchCount - b) * batchSize - (batchSize - i)),
-        '11': randomHex(32),
-        '12': String(18600000000000 + b * batchSize + i),
+        '7': t,
+        '11': idClient,
+        '12': idServer,
       }
+      // 记录每会话最后一条消息（i=batchSize-1）供 7_15 撤回
+      if (i === batchSize - 1) {
+        lastMsgPerSession.push({ peer, idClient, idServer, time: Number(t) })
+      }
+    }
+    // 中位数 ack：使该会话约一半消息 time>ack（未读）、一半 time<=ack（已读）
+    times.sort((a, b) => a - b)
+    // 仅前 ackCount 个会话纳入 4_14 ack map（cs{start}..cs{start+ackCount-1}）
+    if (ackCount > 0 && b < ackCount) {
+      ackByPeer[peer] = times[Math.floor(times.length / 2)]
     }
     const packet = { packetLength: 0, sid: 4, cid: 9, ser: 10000, code: 200, r: [arr] }
     packets[b] = JSON.stringify(packet)
   }
-  return packets
+  // 4_14 sessionAck 包：r=[p2pAckMap, team{m_map:{}}, globalTimetag]
+  let ackPacket = null
+  if (ackCount > 0 && Object.keys(ackByPeer).length) {
+    ackPacket = JSON.stringify({
+      packetLength: 0, sid: 4, cid: 14, ser: ackSer, code: 200,
+      r: [ackByPeer, { m_map: {} }, base]
+    })
+  }
+  // 7_15 撤回包（onDeleteMsgOfflineRoaming）：r=[sysMsgsArray, timetag, type]
+  // 撤回每个会话的最后一条消息。sysMsg wire: 1=type(7=deleteMsgP2p→scene p2p), 2=to, 3=from,
+  //   10=deletedIdClient, 11=deletedIdServer, 14=deletedMsgTime, 15=deletedMsgFromNick
+  // 7_15 在 taskAfterSync（phase2 之后）经 deleteMsgOfflineRoaming → deleteLocalMsg -1
+  let recallPacket = null
+  if (recallLast && lastMsgPerSession.length) {
+    const sysMsgs = lastMsgPerSession.map(function (m, idx) {
+      return {
+        '0': String(base + idx),                       // sysMsg time
+        '1': '7',                                       // type=7 → deleteMsgP2p → scene p2p
+        '2': account,                                   // to = 接收者（自己）
+        '3': m.peer,                                    // from = 撤回人（peer cs{N}）
+        '6': String(18800000000000 + idx),              // sysMsg idServer
+        '10': m.idClient,                               // deletedIdClient（被撤回消息的 idClient）
+        '11': m.idServer,                               // deletedIdServer
+        '14': String(m.time),                           // deletedMsgTime（被撤回消息的 time）
+        '15': 'mock'                                    // deletedMsgFromNick
+      }
+    })
+    recallPacket = JSON.stringify({
+      packetLength: 0, sid: 7, cid: 15, ser: recallSer, code: 200,
+      r: [sysMsgs, base, 1]   // r[1]=timetag, r[2]=type(1=offline)
+    })
+  }
+  return { packets, ackPacket, recallPacket }
 }
 
-module.exports = { buildMockRoamingPacket, buildMockRoamingPackets, SAMPLE_ROAMING_MSGS }
+/**
+ * 从 DB 已有会话的 lastMsg 构造 4_21 单向删除包（syncDeleteMsgSelf）。
+ * 4_21 在 sync 期间立即执行 deleteLocalMsg；目标消息必须在 DB 里（前次同步已入库）。
+ *
+ * @param {Object[]} lastMsgs  各会话 db.getSession(id).lastMsg，需含 idClient/idServer/time/from/to/scene
+ * @param {Number} [ser=10003]  ser（须 > 7_15 的 ser）
+ * @returns {String|null} 4_21 packet JSON 字符串；无有效 lastMsg 时 null
+ */
+function buildMockDeletePacket (lastMsgs, ser = 10003) {
+  if (!Array.isArray(lastMsgs)) lastMsgs = lastMsgs ? [lastMsgs] : []
+  if (!lastMsgs.length) return null
+  var deletedMsgs = lastMsgs.map(function (lm) {
+    if (!lm || !lm.idClient) return null
+    var sceneNum = lm.scene === 'team' ? '2' : '1' // 1=p2p, 2=team
+    return {
+      '1': sceneNum,                                  // scene
+      '2': lm.from,                                   // from = 发送者
+      '3': lm.to,                                     // to = 接收者
+      '4': String(lm.idServer),                       // idServer
+      '5': lm.idClient,                               // idClient
+      '6': String(lm.time),                           // time（被删消息发送时间）
+      '7': String(Number(lm.time) + 1),              // deletedTime（删除动作时间，>6）
+      '8': '{}'                                       // custom
+    }
+  }).filter(Boolean)
+  if (!deletedMsgs.length) return null
+  return JSON.stringify({
+    packetLength: 0, sid: 4, cid: 21, ser: ser, code: 200,
+    r: [deletedMsgs]
+  })
+}
+
+module.exports = { buildMockRoamingPacket, buildMockRoamingPackets, buildMockDeletePacket, SAMPLE_ROAMING_MSGS }

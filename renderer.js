@@ -1,8 +1,8 @@
-const NIM = require('./sdk/NIM_Web_NIM_v8.9.12711-alpha.5')
+const NIM = require('./sdk/NIM_Web_NIM_v8.9.12711-alpha.6')
 // const NIM = require('./sdk/NIM_Web_NIM')
 // const NIM = require('./sdk/NIM_Web_NIM_v8.9.12706')
 const Test = require('./test')
-const { buildMockRoamingPackets } = require('./mock-roaming')
+const { buildMockRoamingPackets, buildMockDeletePacket } = require('./mock-roaming')
 
 document.getElementById('node-ver').textContent = process.versions.node
 document.getElementById('electron-ver').textContent = process.versions.electron
@@ -56,12 +56,18 @@ showView('home')
 
 // ===== NIM 登录 / 登出 / 销毁 =====
 document.getElementById('login').addEventListener('click', login)
-document.getElementById('login-mock-roaming').addEventListener('click', loginMockRoaming)
+document.getElementById('login-mock-roaming').addEventListener('click', () => loginMockRoaming({ ackCount: 0 }))
+document.getElementById('login-mock-roaming-halfack').addEventListener('click', () => loginMockRoaming({ ackCount: 50 }))
+document.getElementById('login-mock-roaming-halfack-recall').addEventListener('click', () => loginMockRoaming({ ackCount: 50, recallLast: true }))
 document.getElementById('disconnect').addEventListener('click', disconnect)
 document.getElementById('destroy').addEventListener('click', destroy)
 
 // 是否在 onconnect 后注入 1w mock 漫游消息
 let triggerMockRoamingOnConnect = false
+// 本次 mock 是否注入 4_14 ack 及注入多少会话（0=不注入 no-ack delta；50=前 50 会话 ack 走 cursor）
+let mockRoamingAckCount = 0
+// 本次 mock 是否注入 7_15 撤回包（撤回每个会话最后一条消息，走 deleteLocalMsg -1）
+let mockRoamingRecallLast = false
 
 function doLog (err, obj) {
   console.log('receive: ', err, obj)
@@ -75,8 +81,14 @@ function destroy () {
   window.nim.destroy({ done (err) { console.log('destroy success', err) } })
 }
 
-/** 触发 1w mock 漫游消息：按 sessionId 拆 100 批，每批 100 条，逐批注入 nim.protocol.onMessage */
-function fireMockRoamingBatches () {
+/** 触发 1w mock 漫游消息：按 sessionId 拆 100 批，每批 100 条，逐批注入 nim.protocol.onMessage
+ *  opts.ackCount: 0=不注入 4_14（全部 no-ack 走 delta）；50=前 50 会话注入 4_14 ack（走 cursor），后 50 no-ack（走 delta）
+ *  opts.recallLast: true=注入 7_15 撤回每个会话最后一条消息（taskAfterSync 走 deleteLocalMsg -1）
+ *                  + 查 DB 拿已有 mock 会话 lastMsg 构造 4_21 单向删除（**在 4_9 之前注入**，使 sessionSet 为空 → DB 路径读老 unread → -1）
+ */
+async function fireMockRoamingBatches (opts = {}) {
+  const ackCount = opts.ackCount || 0
+  const recallLast = !!opts.recallLast
   const nim = window.nim
   if (!nim || !nim.protocol || typeof nim.protocol.onMessage !== 'function') {
     console.error('[mock-roaming] nim.protocol.onMessage 不可用，请先登录')
@@ -87,16 +99,56 @@ function fireMockRoamingBatches () {
     console.error('[mock-roaming] nim.account 为空，无法构造 sessionId')
     return
   }
-  const packets = buildMockRoamingPackets({ account, batchCount: 100, batchSize: 100, start: 100 })
-  console.log('[mock-roaming] 开始注入', packets.length, '批，account=', account)
+  const { packets, ackPacket, recallPacket } = buildMockRoamingPackets({ account, batchCount: 100, batchSize: 100, start: 100, ackCount, recallLast })
+  console.log('[mock-roaming] 开始注入', packets.length, '批漫游', ackPacket ? `+ 4_14 ack（前 ${ackCount} 会话）` : '（无 4_14，全部 no-ack 走 delta）', recallPacket ? '+ 7_15 撤回（每会话最后一条）' : '', recallLast ? '+ 4_21 删除（DB lastMsg，先于 4_9 注入）' : '', 'account=', account)
   startMockMeasure() // 提交数据起点：注入循环开始
   console.time('[mock-roaming] inject all batches')
+
+  // 4_21 先于 4_9 注入：此时 sessionSet 为空（onRoamingMsgs 还没跑）→ getSessionInCache 返 undefined
+  //   → 走 DB 路径 L617 → db.getSession 读到 DB 里的老 unread（非 0）→ session.unread && shouldCountMsgUnread → -1 触发
+  //   只删 p2p-cs199 一个会话的 DB 原 lastMsg，减小日志量
+  if (recallLast) {
+    try {
+      const session = await nim.protocol.db.getSession('p2p-cs199')
+      if (session && session.lastMsg) {
+        const deletePacket = buildMockDeletePacket([session.lastMsg], 10003)
+        if (deletePacket) {
+          nim.protocol.onMessage(deletePacket)
+          console.log('[mock-roaming] 4_21 单向删除已注入（p2p-cs199 lastMsg，先于 4_9，ser=10003）')
+        }
+      } else {
+        console.warn('[mock-roaming] 4_21 跳过：p2p-cs199 在 DB 中无 lastMsg（需先跑一轮漫游让消息入库）')
+      }
+    } catch (e) {
+      console.error('[mock-roaming] 4_21 构造/注入异常', e)
+    }
+  }
+
+  // 4_9 漫游批次
   for (let i = 0; i < packets.length; i++) {
     try {
       nim.protocol.onMessage(packets[i])
       console.log(`[mock-roaming] 批次 ${i + 1}/${packets.length} 已注入 (p2p-cs${100 + i}, 100 条)`)
     } catch (e) {
       console.error(`[mock-roaming] 批次 ${i + 1}/${packets.length} 注入异常`, e)
+    }
+  }
+  // 4_14 ack
+  if (ackPacket) {
+    try {
+      nim.protocol.onMessage(ackPacket)
+      console.log(`[mock-roaming] 4_14 ack 已注入（前 ${ackCount} 会话 p2p-cs100~cs${100 + ackCount - 1}，ack=中位数；后 ${100 - ackCount} 会话 no-ack 走 delta）`)
+    } catch (e) {
+      console.error('[mock-roaming] 4_14 ack 注入异常', e)
+    }
+  }
+  // 7_15 撤回（taskAfterSync 跑，phase2 之后）
+  if (recallPacket) {
+    try {
+      nim.protocol.onMessage(recallPacket)
+      console.log('[mock-roaming] 7_15 撤回已注入（100 会话各撤回最后一条，ser=10002 > 4_14）')
+    } catch (e) {
+      console.error('[mock-roaming] 7_15 撤回注入异常', e)
     }
   }
   console.timeEnd('[mock-roaming] inject all batches')
@@ -154,7 +206,9 @@ function endMockMeasure (fromFallback) {
   console.log('[mock-measure] 采样 ' + samples.length + ' 次，窗口 ' + t0.toFixed(0) + 'ms ~ ' + t1.toFixed(0) + 'ms')
 }
 
-function loginMockRoaming () {
+function loginMockRoaming (opts = {}) {
+  mockRoamingAckCount = opts.ackCount || 0
+  mockRoamingRecallLast = !!opts.recallLast
   triggerMockRoamingOnConnect = true
   login()
 }
@@ -172,12 +226,11 @@ function login () {
     appKey,
     account,
     token,
-    queryOption: 1,
-    enablePinyin: false,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 60000,
-    reconnectionJitter: 0,
-    searchDBPath: process.env.HOME,
+    quickReconnect: true,
+    // queryOption: 1,
+    // enablePinyin: false,
+    // searchDBPath: process.env.HOME,
+	syncSessionUnread: true, // 开启才会同步 ack
 	maxUnreadCount: 500,
 
     onconnect (obj) {
@@ -191,7 +244,7 @@ function login () {
           console.log('[mock-roaming] 等待 reporter/syncStart 事件…')
           nim.protocol.reporterHook.once('reporter/syncStart', () => {
             console.log('[mock-roaming] 收到 reporter/syncStart，setTimeout(0) 后注入')
-            setTimeout(fireMockRoamingBatches, 0)
+            setTimeout(() => fireMockRoamingBatches({ ackCount: mockRoamingAckCount, recallLast: mockRoamingRecallLast }), 0)
           })
         } else {
           console.error('[mock-roaming] nim.protocol.reporterHook.once 不可用，回退到 setTimeout(0)')
